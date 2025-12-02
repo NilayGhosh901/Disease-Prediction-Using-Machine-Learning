@@ -1,9 +1,23 @@
-from tkinter import *
-import numpy as np
-import pandas as pd
-# from gui_stuff import *
 
-l1=['back_pain','constipation','abdominal_pain','diarrhoea','mild_fever','yellow_urine',
+import warnings
+import threading
+from tkinter import messagebox, Canvas, Frame, BOTH, RIGHT, Y
+from pathlib import Path
+import traceback
+from datetime import datetime
+
+import pandas as pd
+import numpy as np
+import customtkinter as ctk
+
+# quiet sklearn warnings
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
+warnings.filterwarnings("ignore", message="The number of unique classes is greater than 50%")
+
+# ---------------------------
+# Symptom list and disease list
+# ---------------------------
+l1 = ['back_pain','constipation','abdominal_pain','diarrhoea','mild_fever','yellow_urine',
 'yellowing_of_eyes','acute_liver_failure','fluid_overload','swelling_of_stomach',
 'swelled_lymph_nodes','malaise','blurred_and_distorted_vision','phlegm','throat_irritation',
 'redness_of_eyes','sinus_pressure','runny_nose','congestion','chest_pain','weakness_in_limbs',
@@ -34,256 +48,385 @@ disease=['Fungal infection','Allergy','GERD','Chronic cholestasis','Drug Reactio
 'Arthritis','(vertigo) Paroymsal  Positional Vertigo','Acne','Urinary tract infection','Psoriasis',
 'Impetigo']
 
-l2=[]
-for x in range(0,len(l1)):
-    l2.append(0)
+# ---------------------------
+# Data files
+# ---------------------------
+TRAIN_CSV = "Training.csv"
+TEST_CSV  = "Testing.csv"
 
-# TESTING DATA df -------------------------------------------------------------------------------------
-df=pd.read_csv("Training.csv")
+def load_data():
+    if not Path(TRAIN_CSV).exists() or not Path(TEST_CSV).exists():
+        raise FileNotFoundError(f"Make sure {TRAIN_CSV} and {TEST_CSV} exist.")
+    df = pd.read_csv(TRAIN_CSV)
+    tr = pd.read_csv(TEST_CSV)
+    mapping = {
+        'Fungal infection':0,'Allergy':1,'GERD':2,'Chronic cholestasis':3,'Drug Reaction':4,
+        'Peptic ulcer diseae':5,'AIDS':6,'Diabetes ':7,'Gastroenteritis':8,'Bronchial Asthma':9,'Hypertension ':10,
+        'Migraine':11,'Cervical spondylosis':12,'Paralysis (brain hemorrhage)':13,'Jaundice':14,'Malaria':15,
+        'Chicken pox':16,'Dengue':17,'Typhoid':18,'hepatitis A':19,'Hepatitis B':20,'Hepatitis C':21,'Hepatitis D':22,
+        'Hepatitis E':23,'Alcoholic hepatitis':24,'Tuberculosis':25,'Common Cold':26,'Pneumonia':27,
+        'Dimorphic hemmorhoids(piles)':28,'Heart attack':29,'Varicose veins':30,'Hypothyroidism':31,
+        'Hyperthyroidism':32,'Hypoglycemia':33,'Osteoarthristis':34,'Arthritis':35,
+        '(vertigo) Paroymsal  Positional Vertigo':36,'Acne':37,'Urinary tract infection':38,'Psoriasis':39,
+        'Impetigo':40
+    }
+    df.replace({'prognosis': mapping}, inplace=True)
+    tr.replace({'prognosis': mapping}, inplace=True)
+    X = df[l1]
+    y = df[["prognosis"]]
+    X_test = tr[l1]
+    y_test = tr[["prognosis"]]
+    return X, y, X_test, y_test
 
-df.replace({'prognosis':{'Fungal infection':0,'Allergy':1,'GERD':2,'Chronic cholestasis':3,'Drug Reaction':4,
-'Peptic ulcer diseae':5,'AIDS':6,'Diabetes ':7,'Gastroenteritis':8,'Bronchial Asthma':9,'Hypertension ':10,
-'Migraine':11,'Cervical spondylosis':12,
-'Paralysis (brain hemorrhage)':13,'Jaundice':14,'Malaria':15,'Chicken pox':16,'Dengue':17,'Typhoid':18,'hepatitis A':19,
-'Hepatitis B':20,'Hepatitis C':21,'Hepatitis D':22,'Hepatitis E':23,'Alcoholic hepatitis':24,'Tuberculosis':25,
-'Common Cold':26,'Pneumonia':27,'Dimorphic hemmorhoids(piles)':28,'Heart attack':29,'Varicose veins':30,'Hypothyroidism':31,
-'Hyperthyroidism':32,'Hypoglycemia':33,'Osteoarthristis':34,'Arthritis':35,
-'(vertigo) Paroymsal  Positional Vertigo':36,'Acne':37,'Urinary tract infection':38,'Psoriasis':39,
-'Impetigo':40}},inplace=True)
+try:
+    X, y, X_test, y_test = load_data()
+    DATA_LOADED = True
+except Exception as e:
+    print("Warning: could not load CSVs:", e)
+    DATA_LOADED = False
+    X = pd.DataFrame(np.zeros((1, len(l1))), columns=l1)
+    y = pd.DataFrame([0])
+    X_test = X.copy()
+    y_test = y.copy()
 
-# print(df.head())
+# ---------------------------
+# prediction helpers and models
+# ---------------------------
+def normalize_prediction(raw):
+    if raw is None:
+        return None
+    try:
+        idx = int(raw)
+        if 0 <= idx < len(disease):
+            return disease[idx]
+        return str(raw)
+    except Exception:
+        pass
+    try:
+        if isinstance(raw, (list, tuple, np.ndarray)):
+            if len(raw) == 0:
+                return None
+            return normalize_prediction(raw[0])
+    except Exception:
+        pass
+    return str(raw)
 
-X= df[l1]
+def _to_df_vector(symptom_vector):
+    try:
+        return pd.DataFrame([symptom_vector], columns=l1)
+    except Exception:
+        return pd.DataFrame([symptom_vector])
 
-y = df[["prognosis"]]
-np.ravel(y)
-# print(y)
+def DecisionTree_predict(symptom_vector):
+    try:
+        from sklearn import tree
+        clf = tree.DecisionTreeClassifier()
+        clf = clf.fit(X, y.values.ravel() if hasattr(y, "values") else np.ravel(y))
+        try:
+            from sklearn.metrics import accuracy_score
+            y_pred = clf.predict(X_test)
+            print("DecisionTree accuracy:", accuracy_score(y_test, y_pred))
+        except Exception:
+            pass
+        X_input = _to_df_vector(symptom_vector)
+        pred = clf.predict(X_input)
+        return normalize_prediction(pred[0])
+    except Exception as e:
+        print("DecisionTree_predict error:", e)
+        traceback.print_exc()
+        return None
 
-# TRAINING DATA tr --------------------------------------------------------------------------------
-tr=pd.read_csv("Testing.csv")
-tr.replace({'prognosis':{'Fungal infection':0,'Allergy':1,'GERD':2,'Chronic cholestasis':3,'Drug Reaction':4,
-'Peptic ulcer diseae':5,'AIDS':6,'Diabetes ':7,'Gastroenteritis':8,'Bronchial Asthma':9,'Hypertension ':10,
-'Migraine':11,'Cervical spondylosis':12,
-'Paralysis (brain hemorrhage)':13,'Jaundice':14,'Malaria':15,'Chicken pox':16,'Dengue':17,'Typhoid':18,'hepatitis A':19,
-'Hepatitis B':20,'Hepatitis C':21,'Hepatitis D':22,'Hepatitis E':23,'Alcoholic hepatitis':24,'Tuberculosis':25,
-'Common Cold':26,'Pneumonia':27,'Dimorphic hemmorhoids(piles)':28,'Heart attack':29,'Varicose veins':30,'Hypothyroidism':31,
-'Hyperthyroidism':32,'Hypoglycemia':33,'Osteoarthristis':34,'Arthritis':35,
-'(vertigo) Paroymsal  Positional Vertigo':36,'Acne':37,'Urinary tract infection':38,'Psoriasis':39,
-'Impetigo':40}},inplace=True)
+def RandomForest_predict(symptom_vector):
+    try:
+        from sklearn.ensemble import RandomForestClassifier
+        clf = RandomForestClassifier()
+        clf = clf.fit(X, np.ravel(y))
+        try:
+            from sklearn.metrics import accuracy_score
+            y_pred = clf.predict(X_test)
+            print("RandomForest accuracy:", accuracy_score(y_test, y_pred))
+        except Exception:
+            pass
+        X_input = _to_df_vector(symptom_vector)
+        pred = clf.predict(X_input)
+        return normalize_prediction(pred[0])
+    except Exception as e:
+        print("RandomForest_predict error:", e)
+        traceback.print_exc()
+        return None
 
-X_test= tr[l1]
-y_test = tr[["prognosis"]]
-np.ravel(y_test)
-# ------------------------------------------------------------------------------------------------------
+def NaiveBayes_predict(symptom_vector):
+    try:
+        from sklearn.naive_bayes import GaussianNB
+        gnb = GaussianNB()
+        gnb = gnb.fit(X, np.ravel(y))
+        try:
+            from sklearn.metrics import accuracy_score
+            y_pred = gnb.predict(X_test)
+            print("NaiveBayes accuracy:", accuracy_score(y_test, y_pred))
+        except Exception:
+            pass
+        X_input = _to_df_vector(symptom_vector)
+        pred = gnb.predict(X_input)
+        return normalize_prediction(pred[0])
+    except Exception as e:
+        print("NaiveBayes_predict error:", e)
+        traceback.print_exc()
+        return None
 
-def DecisionTree():
+def demo_predict(symptom_vector):
+    idxs = [i for i, v in enumerate(symptom_vector) if v]
+    if not idxs:
+        return None
+    return disease[idxs[0] % len(disease)]
 
-    from sklearn import tree
+# ---------------------------
+# UI: scrollable left + right with history and larger fonts
+# ---------------------------
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("dark-blue")
 
-    clf3 = tree.DecisionTreeClassifier()   # empty model of the decision tree
-    clf3 = clf3.fit(X,y)
+class ScrollableFrame(Frame):
+    def __init__(self, master, **kwargs):
+        Frame.__init__(self, master, **kwargs)
+        self.canvas = Canvas(self, highlightthickness=0)
+        self.scroll_frame = Frame(self.canvas)
+        self.vsb = ctk.CTkScrollbar(self, orientation="vertical", command=self.yview)
+        self.vsb.pack(side=RIGHT, fill=Y)
+        self.canvas.pack(side="left", fill=BOTH, expand=True)
+        self.canvas.create_window((0,0), window=self.scroll_frame, anchor="nw")
+        self.scroll_frame.bind("<Configure>", self._on_frame_configure)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
-    # calculating accuracy-------------------------------------------------------------------
-    from sklearn.metrics import accuracy_score
-    y_pred=clf3.predict(X_test)
-    print(accuracy_score(y_test, y_pred))
-    print(accuracy_score(y_test, y_pred,normalize=False))
-    # -----------------------------------------------------
+    def _on_frame_configure(self, event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    psymptoms = [Symptom1.get(),Symptom2.get(),Symptom3.get(),Symptom4.get(),Symptom5.get()]
+    def yview(self, *args):
+        self.canvas.yview(*args)
 
-    for k in range(0,len(l1)):
-        # print (k,)
-        for z in psymptoms:
-            if(z==l1[k]):
-                l2[k]=1
+    def _on_mousewheel(self, event):
+        try:
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        except Exception:
+            pass
 
-    inputtest = [l2]
-    predict = clf3.predict(inputtest)
-    predicted=predict[0]
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        # create fonts AFTER root exists to avoid 'Too early to use font' error
+        self.HEADER_FONT = ctk.CTkFont(size=18, weight="bold")
+        self.SECTION_FONT = ctk.CTkFont(size=14, weight="bold")
+        self.LABEL_FONT = ctk.CTkFont(size=12)
+        self.ENTRY_FONT = ctk.CTkFont(size=12)
+        self.OPTIONMENU_WIDTH = 560
 
-    h='no'
-    for a in range(0,len(disease)):
-        if(predicted == a):
-            h='yes'
-            break
+        self.title("Disease Predictor — Nilay")
+        self.geometry("1150x740")
+        self.minsize(960,640)
 
+        # layout header + body
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
 
-    if (h=='yes'):
-        t1.delete("1.0", END)
-        t1.insert(END, disease[a])
-    else:
-        t1.delete("1.0", END)
-        t1.insert(END, "Not Found")
+        header = ctk.CTkFrame(self, height=56, corner_radius=0, fg_color="#075E54")
+        header.grid(row=0, column=0, sticky="we")
+        header.grid_columnconfigure(0, weight=1)
+        title = ctk.CTkLabel(header, text="  Disease Predictor", font=self.HEADER_FONT, text_color="white", anchor="w")
+        title.grid(row=0, column=0, sticky="w", padx=12)
 
+        body = ctk.CTkFrame(self, fg_color="#ECE5DD")
+        body.grid(row=1, column=0, sticky="nswe", padx=12, pady=12)
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(0, weight=1, uniform="a")
+        body.grid_columnconfigure(1, weight=1, uniform="a")
 
-def randomforest():
-    from sklearn.ensemble import RandomForestClassifier
-    clf4 = RandomForestClassifier()
-    clf4 = clf4.fit(X,np.ravel(y))
+        # left: scrollable form
+        left_card = ctk.CTkFrame(body, fg_color="white", corner_radius=12)
+        left_card.grid(row=0, column=0, sticky="nswe", padx=(12,8), pady=12)
+        left_card.grid_rowconfigure(0, weight=1)
+        left_card.grid_columnconfigure(0, weight=1)
 
-    # calculating accuracy-------------------------------------------------------------------
-    from sklearn.metrics import accuracy_score
-    y_pred=clf4.predict(X_test)
-    print(accuracy_score(y_test, y_pred))
-    print(accuracy_score(y_test, y_pred,normalize=False))
-    # -----------------------------------------------------
+        scroll_container = ScrollableFrame(left_card)
+        scroll_container.grid(row=0, column=0, sticky="nswe", padx=0, pady=0)
+        scroll_container.scroll_frame.grid_columnconfigure(0, weight=1)
 
-    psymptoms = [Symptom1.get(),Symptom2.get(),Symptom3.get(),Symptom4.get(),Symptom5.get()]
+        # Patient Name
+        self.name_var = ctk.StringVar()
+        lbl_name = ctk.CTkLabel(scroll_container.scroll_frame, text="Patient Name", anchor="w", font=self.SECTION_FONT, text_color="#222222")
+        lbl_name.grid(row=0, column=0, sticky="we", padx=20, pady=(18,6))
+        self.name_entry = ctk.CTkEntry(scroll_container.scroll_frame, textvariable=self.name_var, placeholder_text="Enter patient name", font=self.ENTRY_FONT)
+        self.name_entry.grid(row=1, column=0, sticky="we", padx=20, pady=(0,12))
 
-    for k in range(0,len(l1)):
-        for z in psymptoms:
-            if(z==l1[k]):
-                l2[k]=1
+        # fixed 5 symptom selectors
+        self.sym_vars = []
+        for i in range(5):
+            bubble = ctk.CTkFrame(scroll_container.scroll_frame, corner_radius=10, fg_color="#F7F7F7")
+            bubble.grid(row=2 + i*2, column=0, sticky="we", padx=20, pady=(10,6))
+            bubble.grid_columnconfigure(0, weight=1)
 
-    inputtest = [l2]
-    predict = clf4.predict(inputtest)
-    predicted=predict[0]
+            lbl = ctk.CTkLabel(bubble, text=f"Symptom {i+1}", anchor="w", font=self.LABEL_FONT, text_color="#222222")
+            lbl.grid(row=0, column=0, sticky="w", padx=12, pady=(8,0))
+            var = ctk.StringVar(value="None")
+            opt = ctk.CTkOptionMenu(bubble, values=sorted(l1), variable=var, width=self.OPTIONMENU_WIDTH)
+            opt.grid(row=1, column=0, sticky="we", padx=12, pady=(6,12))
+            self.sym_vars.append(var)
 
-    h='no'
-    for a in range(0,len(disease)):
-        if(predicted == a):
-            h='yes'
-            break
+        # right: results + model buttons + clear history
+        right_card = ctk.CTkFrame(body, fg_color="white", corner_radius=12)
+        right_card.grid(row=0, column=1, sticky="nswe", padx=(8,12), pady=12)
+        right_card.grid_rowconfigure(3, weight=1)
+        right_card.grid_columnconfigure(0, weight=1)
 
-    if (h=='yes'):
-        t2.delete("1.0", END)
-        t2.insert(END, disease[a])
-    else:
-        t2.delete("1.0", END)
-        t2.insert(END, "Not Found")
+        result_title = ctk.CTkLabel(right_card, text="Prediction Result", anchor="w", font=self.SECTION_FONT, text_color="#222222")
+        result_title.grid(row=0, column=0, sticky="w", padx=12, pady=(12,6))
 
+        # model buttons
+        model_frame = ctk.CTkFrame(right_card, fg_color=None)
+        model_frame.grid(row=1, column=0, sticky="we", padx=12, pady=(0,8))
+        model_frame.grid_columnconfigure((0,1,2,3), weight=1)
+        self.btn_dt = ctk.CTkButton(model_frame, text="Decision Tree", command=lambda: self.run_model("DecisionTree"))
+        self.btn_rf = ctk.CTkButton(model_frame, text="Random Forest", command=lambda: self.run_model("RandomForest"))
+        self.btn_nb = ctk.CTkButton(model_frame, text="Naive Bayes", command=lambda: self.run_model("NaiveBayes"))
+        self.btn_clear = ctk.CTkButton(model_frame, text="Clear History", command=self.clear_history)
+        self.btn_dt.grid(row=0, column=0, padx=6, sticky="we")
+        self.btn_rf.grid(row=0, column=1, padx=6, sticky="we")
+        self.btn_nb.grid(row=0, column=2, padx=6, sticky="we")
+        self.btn_clear.grid(row=0, column=3, padx=6, sticky="we")
 
-def NaiveBayes():
-    from sklearn.naive_bayes import GaussianNB
-    gnb = GaussianNB()
-    gnb=gnb.fit(X,np.ravel(y))
+        # result history box (append-capable) - larger font
+        self.result_box = ctk.CTkTextbox(right_card, width=1, height=260, font=ctk.CTkFont(size=12))
+        self.result_box.grid(row=2, column=0, sticky="nswe", padx=12, pady=(0,8))
+        self.result_box.configure(state="disabled")
 
-    # calculating accuracy-------------------------------------------------------------------
-    from sklearn.metrics import accuracy_score
-    y_pred=gnb.predict(X_test)
-    print(accuracy_score(y_test, y_pred))
-    print(accuracy_score(y_test, y_pred,normalize=False))
-    # -----------------------------------------------------
+        info_title = ctk.CTkLabel(right_card, text="Details & Advice (History)", anchor="w", font=self.SECTION_FONT, text_color="#222222")
+        info_title.grid(row=3, column=0, sticky="w", padx=12, pady=(6,2))
 
-    psymptoms = [Symptom1.get(),Symptom2.get(),Symptom3.get(),Symptom4.get(),Symptom5.get()]
-    for k in range(0,len(l1)):
-        for z in psymptoms:
-            if(z==l1[k]):
-                l2[k]=1
+        # details/history multiline textbox (append-capable) - larger font
+        self.info_text = ctk.CTkTextbox(right_card, height=200, font=ctk.CTkFont(size=12))
+        self.info_text.grid(row=4, column=0, sticky="nswe", padx=12, pady=(0,12))
+        self.info_text.configure(state="disabled")
 
-    inputtest = [l2]
-    predict = gnb.predict(inputtest)
-    predicted=predict[0]
+        # status
+        self.status_var = ctk.StringVar(value="Ready")
+        status = ctk.CTkLabel(self, textvariable=self.status_var, anchor="w", font=ctk.CTkFont(size=11))
+        status.grid(row=2, column=0, sticky="we", padx=12, pady=(0,8))
 
-    h='no'
-    for a in range(0,len(disease)):
-        if(predicted == a):
-            h='yes'
-            break
+        self.history = []
 
-    if (h=='yes'):
-        t3.delete("1.0", END)
-        t3.insert(END, disease[a])
-    else:
-        t3.delete("1.0", END)
-        t3.insert(END, "Not Found")
+    # helper to append text to CTkTextbox (keeps it readonly to user)
+    def _append_textbox(self, textbox: ctk.CTkTextbox, text: str, separator: str = "\n\n"):
+        try:
+            textbox.configure(state="normal")
+            current = textbox.get("0.0", "end").strip()
+            if current:
+                textbox.insert("end", separator)
+            textbox.insert("end", text)
+            textbox.see("end")
+            textbox.configure(state="disabled")
+        except Exception as e:
+            print("Error appending textbox:", e)
+            traceback.print_exc()
 
-# gui_stuff------------------------------------------------------------------------------------
+    def clear_history(self):
+        self.result_box.configure(state="normal")
+        self.result_box.delete("0.0", "end")
+        self.result_box.configure(state="disabled")
+        self.info_text.configure(state="normal")
+        self.info_text.delete("0.0", "end")
+        self.info_text.configure(state="disabled")
+        self.history = []
+        messagebox.showinfo("History cleared", "All previous results were cleared.")
 
-root = Tk()
-root.configure(background='#ba920f')
+    def set_info_text(self, text):
+        self.info_text.configure(state="normal")
+        self.info_text.delete("0.0", "end")
+        self.info_text.insert("0.0", text)
+        self.info_text.configure(state="disabled")
 
-# entry variables
-Symptom1 = StringVar()
-Symptom1.set(None)
-Symptom2 = StringVar()
-Symptom2.set(None)
-Symptom3 = StringVar()
-Symptom3.set(None)
-Symptom4 = StringVar()
-Symptom4.set(None)
-Symptom5 = StringVar()
-Symptom5.set(None)
-Name = StringVar()
+    def collect_symptoms(self):
+        return [v.get() for v in self.sym_vars if v.get() and v.get() != "None"]
 
-# Heading
-w2 = Label(root, justify=LEFT, text="Disease Predictor using Machine Learning", fg="white", bg="#ba920f")
-w2.config(font=("Elephant", 30))
-w2.grid(row=1, column=0, columnspan=2, padx=100)
-w2 = Label(root, justify=LEFT, text="A Project by Final year Student", fg="white", bg="#ba920f")
-w2.config(font=("Aharoni", 30))
-w2.grid(row=2, column=0, columnspan=2, padx=100)
+    def disable_controls(self, disabled=True):
+        widgets = [self.btn_dt, self.btn_rf, self.btn_nb, self.btn_clear, self.name_entry]
+        for w in widgets:
+            try:
+                w.configure(state="disabled" if disabled else "normal")
+            except Exception:
+                pass
 
-# labels
-NameLb = Label(root, text="Name of the Patient", fg="yellow", bg="black")
-NameLb.grid(row=6, column=0, pady=15, sticky=W)
+    def run_model(self, model_key):
+        symptoms = self.collect_symptoms()
+        if not symptoms:
+            messagebox.showinfo("No symptoms", "Please select at least one symptom.")
+            return
+        vec = [0] * len(l1)
+        for s in symptoms:
+            if s in l1:
+                vec[l1.index(s)] = 1
 
+        self.status_var.set(f"Running {model_key}...")
+        self.disable_controls(True)
+        t = threading.Thread(target=self._worker, args=(model_key, vec), daemon=True)
+        t.start()
 
-S1Lb = Label(root, text="Symptom 1", fg="yellow", bg="black")
-S1Lb.grid(row=7, column=0, pady=10, sticky=W)
+    def _worker(self, model_key, vec):
+        try:
+            if model_key == "DecisionTree":
+                result = DecisionTree_predict(vec) if DATA_LOADED else demo_predict(vec)
+            elif model_key == "RandomForest":
+                result = RandomForest_predict(vec) if DATA_LOADED else demo_predict(vec)
+            elif model_key == "NaiveBayes":
+                result = NaiveBayes_predict(vec) if DATA_LOADED else demo_predict(vec)
+            else:
+                result = demo_predict(vec)
+        except Exception as e:
+            result = f"Error: {e}"
+            print("Worker exception:", e)
+            traceback.print_exc()
 
-S2Lb = Label(root, text="Symptom 2", fg="yellow", bg="black")
-S2Lb.grid(row=8, column=0, pady=10, sticky=W)
+        if result is None:
+            result = "No clear prediction"
 
-S3Lb = Label(root, text="Symptom 3", fg="yellow", bg="black")
-S3Lb.grid(row=9, column=0, pady=10, sticky=W)
+        self.after(0, lambda: self._append_history_entry(model_key, result))
 
-S4Lb = Label(root, text="Symptom 4", fg="yellow", bg="black")
-S4Lb.grid(row=10, column=0, pady=10, sticky=W)
+    def _append_history_entry(self, model_name, prediction):
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result_text = f"[{ts}] {model_name} → {prediction}"
+        details = (
+            f"[{ts}] Model: {model_name}\nPrediction: {prediction}\n\n"
+            f"Selected symptoms:\n{', '.join(self.collect_symptoms())}\n\n"
+            "Recommendation:\n• This is an automated prediction. Consult a clinician for confirmation."
+        )
+        self.history.append({"time": ts, "model": model_name, "prediction": prediction, "symptoms": self.collect_symptoms()})
+        self._append_textbox(self.result_box, result_text)
+        self._append_textbox(self.info_text, details)
+        self.disable_controls(False)
+        self.status_var.set("Ready")
 
-S5Lb = Label(root, text="Symptom 5", fg="yellow", bg="black")
-S5Lb.grid(row=11, column=0, pady=10, sticky=W)
+    def reload_data(self):
+        # kept for completeness (no left button shown)
+        self.status_var.set("Reloading CSVs...")
+        self.disable_controls(True)
+        try:
+            global X, y, X_test, y_test, DATA_LOADED
+            X, y, X_test, y_test = load_data()
+            DATA_LOADED = True
+            messagebox.showinfo("Reload", "CSV files reloaded successfully.")
+        except Exception as e:
+            DATA_LOADED = False
+            messagebox.showwarning("Reload failed", f"Could not reload CSVs: {e}")
+        finally:
+            self.status_var.set("Ready")
+            self.disable_controls(False)
 
-
-lrLb = Label(root, text="DecisionTree", fg="white", bg="red")
-lrLb.grid(row=15, column=0, pady=10,sticky=W)
-
-destreeLb = Label(root, text="RandomForest", fg="white", bg="red")
-destreeLb.grid(row=17, column=0, pady=10, sticky=W)
-
-ranfLb = Label(root, text="NaiveBayes", fg="white", bg="red")
-ranfLb.grid(row=19, column=0, pady=10, sticky=W)
-
-# entries
-OPTIONS = sorted(l1)
-
-NameEn = Entry(root, textvariable=Name)
-NameEn.grid(row=6, column=1)
-
-S1En = OptionMenu(root, Symptom1,*OPTIONS)
-S1En.grid(row=7, column=1)
-
-S2En = OptionMenu(root, Symptom2,*OPTIONS)
-S2En.grid(row=8, column=1)
-
-S3En = OptionMenu(root, Symptom3,*OPTIONS)
-S3En.grid(row=9, column=1)
-
-S4En = OptionMenu(root, Symptom4,*OPTIONS)
-S4En.grid(row=10, column=1)
-
-S5En = OptionMenu(root, Symptom5,*OPTIONS)
-S5En.grid(row=11, column=1)
-
-
-dst = Button(root, text="DecisionTree", command=DecisionTree,bg="green",fg="yellow")
-dst.grid(row=8, column=3,padx=10)
-
-rnf = Button(root, text="Randomforest", command=randomforest,bg="green",fg="yellow")
-rnf.grid(row=9, column=3,padx=10)
-
-lr = Button(root, text="NaiveBayes", command=NaiveBayes,bg="green",fg="yellow")
-lr.grid(row=10, column=3,padx=10)
-
-#textfileds
-t1 = Text(root, height=1, width=40,bg="white",fg="black")
-t1.grid(row=15, column=1, padx=10)
-
-t2 = Text(root, height=1, width=40,bg="white",fg="black")
-t2.grid(row=17, column=1 , padx=10)
-
-t3 = Text(root, height=1, width=40,bg="white",fg="black")
-t3.grid(row=19, column=1 , padx=10)
-
-root.mainloop()
+# ---------------------------
+# entry point
+# ---------------------------
+if __name__ == "__main__":
+    try:
+        app = App()
+        app.set_info_text("Select symptoms and tap a model. Results and details will appear in the right panel. Use Clear History to remove entries.")
+        app.mainloop()
+    except Exception as e:
+        print("Fatal UI error:", e)
+        traceback.print_exc()
